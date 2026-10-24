@@ -1,0 +1,33 @@
+name: IslandShot
+options:
+  bundleIdPrefix: app.islandshot
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  IslandShot:
+    type: application
+    platform: iOS
+    sources:
+      - path: IslandShot
+    info:
+      path: IslandShot/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.islandshot.app
+        PRODUCT_NAME: IslandShot
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_KEY_CFBundleDisplayName: IslandShot
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_ALLOWED: NO
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+schemes:
+  IslandShot:
+    build:
+      targets:
+        IslandShot: all
+    run:
+      config: Debug
+    archive:
+      config: Release
