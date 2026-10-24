@@ -69,11 +69,23 @@ struct ContentView: View {
                             }
                         }
                     } else {
-                        ContentUnavailableView(
-                            "Скриншот ещё не выбран",
-                            systemImage: "iphone",
-                            description: Text("Выбери изображение из Фото — здесь появится результат.")
-                        )
+                        VStack(spacing: 12) {
+                            Image(systemName: "iphone")
+                                .font(.system(size: 42))
+                                .foregroundStyle(.secondary)
+
+                            Text("Скриншот ещё не выбран")
+                                .font(.headline)
+
+                            Text("Выбери изображение из Фото — здесь появится результат.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 28)
+                        .padding(.horizontal, 16)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
                         .padding(.top, 12)
                     }
 
@@ -96,7 +108,7 @@ struct ContentView: View {
                 .padding()
             }
             .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: selectedItem) { _, item in
+            .onChange(of: selectedItem) { item in
                 showSaved = false
                 errorMessage = nil
                 Task {
@@ -162,7 +174,6 @@ enum IslandRenderer {
             let y = size.height * topFraction
             let rect = CGRect(x: x, y: y, width: w, height: h)
 
-            // Soft shadow for a more natural, hardware-like pill.
             context.cgContext.setShadow(
                 offset: CGSize(width: 0, height: 1),
                 blur: max(2, h * 0.08),
