@@ -1,17 +1,15 @@
-# IslandShot — GitHub Actions build
+# IslandShot
 
-This repository includes a minimal SwiftUI app and a GitHub Actions workflow that builds an **unsigned IPA** on a macOS runner.
+Добавляет Dynamic Island на скриншоты со старых айфонов с чёлкой (X – 14) — как обычный остров, так и с активностями: блокировка, Face ID, зарядка, бесшумный режим, звонки, таймер, музыка, AirPods.
 
-## Build it
-1. Create a new GitHub repository.
-2. Upload all files from this folder (keep the `.github/workflows/build-ipa.yml` path).
-3. Open **Actions** → **Build IslandShot IPA** → **Run workflow** (or push to `main`).
-4. When the run finishes, open the run and download the `IslandShot-unsigned-IPA` artifact.
-5. Import `IslandShot-unsigned.ipa` into Sideloadly and let Sideloadly sign/install it using your Apple ID.
+## Как это работает
+- По разрешению скриншота определяется модель (`DeviceProfile.swift`), и остров рисуется в реальных размерах: 126 × 37.33 pt, 11.33 pt от верха, как на 14 Pro и новее.
+- Пресеты описаны в `IslandPreset.swift`, а их внешний вид — в `IslandView.swift`. Чтобы добавить пресет, нужен новый `case` в enum и ветка в `IslandView.content`.
+- Превью и экспорт отрисовываются одним SwiftUI-видом (`CompositeView`), поэтому сохранённый файл выглядит так же, как превью. Экспорт идёт в исходном разрешении, без потерь (PNG).
 
-## Important
-- This workflow builds an **unsigned** IPA; Sideloadly must sign it. It is not a ready-to-install signed IPA.
-- A free Apple ID signing typically needs re-signing/reinstalling after the signing period expires; Sideloadly will show the applicable details.
-- The workflow has not been run in this environment, so the first GitHub run is the actual build test.
-- The app overlays a configurable black pill on an image. It does not change iOS or the physical notch, and it does not yet automatically detect/erase the old notch content.
-- For privacy, keep signing certificates and Apple ID credentials out of the repository and GitHub logs.
+## Сборка
+1. Загрузи папку в репозиторий на GitHub (вместе с `.github/workflows/build-ipa.yml`).
+2. **Actions → Build IslandShot IPA → Run workflow** (или запушь в `main`).
+3. Скачай артефакт `IslandShot-unsigned-IPA` и установи `IslandShot-unsigned.ipa` через Sideloadly со своим Apple ID.
+
+Нужен iOS 17 или новее. IPA собирается неподписанным: подписывает Sideloadly. С бесплатным Apple ID подпись действует 7 дней.

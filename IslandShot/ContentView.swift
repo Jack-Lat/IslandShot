@@ -1,187 +1,303 @@
 import SwiftUI
 import PhotosUI
-import Photos
 
 struct ContentView: View {
-    @State private var selectedItem: PhotosPickerItem?
-    @State private var sourceImage: UIImage?
-    @State private var islandWidth: Double = 0.325
-    @State private var islandHeight: Double = 0.043
-    @State private var islandTop: Double = 0.068
-    @State private var showSaved = false
-    @State private var errorMessage: String?
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var original: UIImage?
+    @State private var preview: UIImage?
+    @State private var profile: DeviceProfile?
 
-    private var processedImage: UIImage? {
-        guard let sourceImage else { return nil }
-        return IslandRenderer.render(
-            sourceImage,
-            widthFraction: islandWidth,
-            heightFraction: islandHeight,
-            topFraction: islandTop
+    @State private var preset: IslandPreset = .lock
+    @State private var values: [IslandPreset: PresetValues] = [:]
+    @State private var offsetY: Double = 0
+    @State private var scale: Double = 1
+    @State private var zoomed = true
+
+    @State private var isBusy = false
+    @State private var message: StatusMessage?
+    @State private var shareItem: ShareItem?
+
+    private var config: IslandConfig {
+        IslandConfig(
+            preset: preset,
+            values: values[preset] ?? preset.defaultValues,
+            offsetY: offsetY,
+            scale: scale
         )
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("IslandShot")
-                            .font(.largeTitle.bold())
-                        Text("Добавь Dynamic Island к скриншоту в пару нажатий.")
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    PhotosPicker(selection: $selectedItem, matching: .images) {
-                        Label(sourceImage == nil ? "Выбрать скриншот" : "Выбрать другой скриншот",
-                              systemImage: "photo.on.rectangle.angled")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(.blue, in: RoundedRectangle(cornerRadius: 16))
-                            .foregroundStyle(.white)
-                    }
-
-                    if let image = processedImage {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Предпросмотр").font(.headline)
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFit()
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                                .overlay(RoundedRectangle(cornerRadius: 12).stroke(.secondary.opacity(0.25)))
-                            Text("Настройка положения")
-                                .font(.headline)
-                            settingSlider("Ширина", value: $islandWidth, range: 0.24...0.42)
-                            settingSlider("Высота", value: $islandHeight, range: 0.028...0.065)
-                            settingSlider("Отступ сверху", value: $islandTop, range: 0.035...0.105)
-
-                            Button {
-                                saveImage()
-                            } label: {
-                                Label("Сохранить в Фото", systemImage: "square.and.arrow.down")
-                                    .font(.headline)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(.green, in: RoundedRectangle(cornerRadius: 16))
-                                    .foregroundStyle(.white)
-                            }
+                if let preview, let profile {
+                    editor(preview: preview, profile: profile)
+                } else {
+                    emptyState
+                }
+            }
+            .navigationTitle("IslandShot")
+            .toolbar {
+                if original != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        PhotosPicker(selection: $pickerItem, matching: .images, preferredItemEncoding: .current) {
+                            Image(systemName: "photo.badge.plus")
                         }
-                    } else {
-                        VStack(spacing: 12) {
-                            Image(systemName: "iphone")
-                                .font(.system(size: 42))
-                                .foregroundStyle(.secondary)
-
-                            Text("Скриншот ещё не выбран")
-                                .font(.headline)
-
-                            Text("Выбери изображение из Фото — здесь появится результат.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 28)
-                        .padding(.horizontal, 16)
-                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16))
-                        .padding(.top, 12)
                     }
+                }
+            }
+            .onChange(of: pickerItem) { _, item in
+                Task { await load(item) }
+            }
+            .sheet(item: $shareItem) { item in
+                ShareSheet(items: [item.url])
+            }
+        }
+    }
 
-                    if let errorMessage {
-                        Text(errorMessage)
-                            .font(.footnote)
-                            .foregroundStyle(.red)
-                    }
-                    if showSaved {
-                        Label("Сохранено в Фото", systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.subheadline.weight(.semibold))
-                    }
+    // MARK: - Экраны
 
-                    Text("Обрабатывается только выбранное изображение. Оригинал не изменяется.")
-                        .font(.footnote)
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "iphone")
+                .font(.system(size: 56, weight: .light))
+                .foregroundStyle(.secondary)
+            Text("Выбери скриншот")
+                .font(.title2.bold())
+            Text("Подойдут скриншоты с iPhone X – 14 с чёлкой. Остров добавится в статус-бар, оригинал не изменится.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            PhotosPicker(selection: $pickerItem, matching: .images, preferredItemEncoding: .current) {
+                Label("Выбрать из Фото", systemImage: "photo.on.rectangle.angled")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .foregroundStyle(.white)
+            }
+            .padding(.top, 8)
+            messageView
+        }
+        .padding(24)
+        .padding(.top, 60)
+    }
+
+    private func editor(preview: UIImage, profile: DeviceProfile) -> some View {
+        VStack(alignment: .leading, spacing: 22) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker("Вид", selection: $zoomed) {
+                    Text("Крупно").tag(true)
+                    Text("Целиком").tag(false)
+                }
+                .pickerStyle(.segmented)
+
+                PreviewView(image: preview, canvas: profile.pointSize, config: config, zoomed: zoomed)
+
+                HStack(spacing: 6) {
+                    Image(systemName: profile.isKnown ? "iphone" : "questionmark.circle")
+                    Text(profile.isKnown ? profile.name : "Устройство не распознано — подстрой положение вручную")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            section("Пресет") { presetGrid }
+
+            if !preset.fields.isEmpty {
+                section("Текст") { fieldsView }
+            }
+
+            section("Тонкая настройка") { tuningView }
+
+            actions
+            messageView
+        }
+        .padding()
+    }
+
+    // MARK: - Блоки
+
+    private var presetGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 8)], spacing: 8) {
+            ForEach(IslandPreset.allCases) { item in
+                let selected = item == preset
+                Button {
+                    preset = item
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 18, weight: .semibold))
+                            .frame(height: 24)
+                        Text(item.title)
+                            .font(.caption2.weight(.medium))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 10)
+                    .foregroundStyle(selected ? Color.accentColor : Color.primary)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(selected ? Color.accentColor.opacity(0.15) : Color(uiColor: .secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var fieldsView: some View {
+        VStack(spacing: 8) {
+            ForEach(preset.fields) { field in
+                HStack {
+                    Text(field.label)
                         .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    TextField(field.label, text: binding(for: field.key))
+                        .multilineTextAlignment(.trailing)
                 }
-                .padding()
+                .padding(12)
+                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .onChange(of: selectedItem) { item in
-                showSaved = false
-                errorMessage = nil
-                Task {
-                    guard let data = try? await item?.loadTransferable(type: Data.self),
-                          let image = UIImage(data: data) else {
-                        errorMessage = "Не удалось открыть изображение. Попробуй выбрать другой скриншот."
-                        return
-                    }
-                    sourceImage = image
-                }
+        }
+    }
+
+    private var tuningView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            slider("Сдвиг по вертикали", value: $offsetY, range: -8...24, step: 0.5,
+                   display: String(format: "%+.1f pt", offsetY))
+            slider("Размер", value: $scale, range: 0.85...1.2, step: 0.01,
+                   display: "\(Int((scale * 100).rounded()))%")
+            Button("Сбросить") {
+                offsetY = 0
+                scale = 1
             }
+            .font(.subheadline)
+            .disabled(offsetY == 0 && scale == 1)
+        }
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    private var actions: some View {
+        HStack(spacing: 12) {
+            Button {
+                export(.save)
+            } label: {
+                Label("Сохранить", systemImage: "square.and.arrow.down")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            Button {
+                export(.share)
+            } label: {
+                Label("Поделиться", systemImage: "square.and.arrow.up")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .controlSize(.large)
+        .disabled(isBusy)
+        .overlay {
+            if isBusy { ProgressView() }
         }
     }
 
     @ViewBuilder
-    private func settingSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+    private var messageView: some View {
+        if let message {
+            Label(message.text, systemImage: message.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(message.isError ? Color.red : Color.green)
+        }
+    }
+
+    // MARK: - Помощники
+
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline)
+            content()
+        }
+    }
+
+    private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>,
+                        step: Double, display: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(title)
                 Spacer()
-                Text("\(Int(value.wrappedValue * 100))%")
+                Text(display)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(value: value, in: range)
+            Slider(value: value, in: range, step: step)
         }
     }
 
-    private func saveImage() {
-        guard let image = processedImage else { return }
-        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-            guard status == .authorized || status == .limited else {
-                DispatchQueue.main.async {
-                    errorMessage = "Разреши приложению добавлять изображения в Фото в настройках iPhone."
-                }
-                return
+    private func binding(for key: WritableKeyPath<PresetValues, String>) -> Binding<String> {
+        Binding(
+            get: { (values[preset] ?? preset.defaultValues)[keyPath: key] },
+            set: { newValue in
+                var current = values[preset] ?? preset.defaultValues
+                current[keyPath: key] = newValue
+                values[preset] = current
             }
-            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
-            DispatchQueue.main.async {
-                showSaved = true
-                errorMessage = nil
+        )
+    }
+
+    // MARK: - Действия
+
+    private func load(_ item: PhotosPickerItem?) async {
+        guard let item else { return }
+        message = nil
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let image = UIImage(data: data) else {
+            message = StatusMessage(text: "Не удалось открыть изображение. Попробуй другое.", isError: true)
+            return
+        }
+        original = image
+        preview = image.downsampled(toMaxWidth: 1000)
+        profile = DeviceProfile.detect(for: CGSize(width: image.size.width * image.scale,
+                                                   height: image.size.height * image.scale))
+    }
+
+    private func export(_ action: ExportAction) {
+        guard let original, let profile else { return }
+        isBusy = true
+        message = nil
+        let snapshot = self.config
+        Task {
+            defer { isBusy = false }
+            do {
+                let png = try Exporter.renderPNG(image: original, profile: profile, config: snapshot)
+                switch action {
+                case .save:
+                    try await Exporter.saveToPhotos(png)
+                    message = StatusMessage(text: "Сохранено в Фото", isError: false)
+                case .share:
+                    shareItem = ShareItem(url: try Exporter.temporaryFile(png))
+                }
+            } catch {
+                message = StatusMessage(text: error.localizedDescription, isError: true)
             }
         }
     }
 }
 
-enum IslandRenderer {
-    static func render(_ image: UIImage, widthFraction: Double, heightFraction: Double, topFraction: Double) -> UIImage? {
-        let size = image.size
-        guard size.width > 0, size.height > 0 else { return nil }
+private enum ExportAction {
+    case save, share
+}
 
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = image.scale
-        format.opaque = true
+private struct StatusMessage {
+    let text: String
+    let isError: Bool
+}
 
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
-        return renderer.image { context in
-            image.draw(in: CGRect(origin: .zero, size: size))
-
-            let w = size.width * widthFraction
-            let h = size.height * heightFraction
-            let x = (size.width - w) / 2
-            let y = size.height * topFraction
-            let rect = CGRect(x: x, y: y, width: w, height: h)
-
-            context.cgContext.setShadow(
-                offset: CGSize(width: 0, height: 1),
-                blur: max(2, h * 0.08),
-                color: UIColor.black.withAlphaComponent(0.28).cgColor
-            )
-            UIColor.black.setFill()
-            UIBezierPath(roundedRect: rect, cornerRadius: h / 2).fill()
-            context.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
-        }
-    }
+private struct ShareItem: Identifiable {
+    let id = UUID()
+    let url: URL
 }
