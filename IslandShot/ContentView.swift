@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var values: [IslandPreset: PresetValues] = [:]
     @State private var offsetY: Double = 0
     @State private var scale: Double = 1
+    @State private var statusBarShift: Double = IslandMetrics.statusBarShift
     @State private var zoomed = true
 
     @State private var isBusy = false
@@ -22,7 +23,8 @@ struct ContentView: View {
             preset: preset,
             values: values[preset] ?? preset.defaultValues,
             offsetY: offsetY,
-            scale: scale
+            scale: scale,
+            statusBarShift: statusBarShift
         )
     }
 
@@ -170,12 +172,15 @@ struct ContentView: View {
                    display: String(format: "%+.1f pt", offsetY))
             slider("Размер", value: $scale, range: 0.85...1.2, step: 0.01,
                    display: "\(Int((scale * 100).rounded()))%")
+            slider("Статус-бар вниз", value: $statusBarShift, range: 0...10, step: 0.5,
+                   display: String(format: "%.1f pt", statusBarShift))
             Button("Сбросить") {
                 offsetY = 0
                 scale = 1
+                statusBarShift = IslandMetrics.statusBarShift
             }
             .font(.subheadline)
-            .disabled(offsetY == 0 && scale == 1)
+            .disabled(offsetY == 0 && scale == 1 && statusBarShift == IslandMetrics.statusBarShift)
         }
         .padding(12)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))

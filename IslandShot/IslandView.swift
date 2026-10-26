@@ -9,6 +9,10 @@ enum IslandMetrics {
     static let cameraGap: CGFloat = 96
     static let compactInset: CGFloat = 12
     static let minimalGap: CGFloat = 6
+    /// Насколько опустить статус-бар, чтобы время встало по центру острова.
+    static let statusBarShift: CGFloat = 6
+    /// Высота полосы со временем и значками (статус-бар с чёлкой — 44–48 pt, контент ниже не трогаем).
+    static let statusBarBand: CGFloat = 40
 }
 
 /// Системные цвета iOS в тёмной теме.
@@ -258,10 +262,21 @@ struct CompositeView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            Image(uiImage: image)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: canvas.width, height: canvas.height)
+            screenshot
+
+            if config.statusBarShift > 0 {
+                // Полоса статус-бара, опущенная вниз.
+                screenshot
+                    .frame(width: canvas.width, height: IslandMetrics.statusBarBand, alignment: .top)
+                    .clipped()
+                    .offset(y: config.statusBarShift)
+
+                // Освободившуюся полоску сверху заполняем растянутой верхней строкой пикселей.
+                screenshot
+                    .frame(width: canvas.width, height: 1, alignment: .top)
+                    .clipped()
+                    .scaleEffect(x: 1, y: config.statusBarShift + 0.5, anchor: .top)
+            }
 
             IslandView(preset: config.preset, values: config.values, screenWidth: canvas.width)
                 .scaleEffect(config.scale, anchor: .top)
@@ -269,6 +284,13 @@ struct CompositeView: View {
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .top)
         .clipped()
+    }
+
+    private var screenshot: some View {
+        Image(uiImage: image)
+            .resizable()
+            .interpolation(.high)
+            .frame(width: canvas.width, height: canvas.height)
     }
 }
 

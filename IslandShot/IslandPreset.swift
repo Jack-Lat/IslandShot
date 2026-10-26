@@ -17,6 +17,8 @@ struct IslandConfig {
     var values: PresetValues
     var offsetY: CGFloat = 0
     var scale: CGFloat = 1
+    /// На айфонах с островом время и значки стоят ниже, чем на айфонах с чёлкой.
+    var statusBarShift: CGFloat = IslandMetrics.statusBarShift
 }
 
 enum IslandPreset: String, CaseIterable, Identifiable {
