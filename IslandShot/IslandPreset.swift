@@ -19,11 +19,15 @@ struct IslandConfig {
     var scale: CGFloat = 1
     /// На айфонах с островом время и значки стоят ниже, чем на айфонах с чёлкой.
     var statusBarShift: CGFloat = IslandMetrics.statusBarShift
+    /// Цвет иконки и текста для пресета «Свой».
+    var tint: Color = IslandColors.green
+    /// Чем закрасить зону бывшей чёлки (nil — не закрашивать).
+    var notchFill: Color? = nil
 }
 
 enum IslandPreset: String, CaseIterable, Identifiable {
     case plain, lock, faceID, charging, lowBattery, silent, ring
-    case call, incomingCall, timer, timerMinimal, music, airpods
+    case call, incomingCall, timer, timerMinimal, music, airpods, custom
 
     var id: String { rawValue }
 
@@ -42,6 +46,7 @@ enum IslandPreset: String, CaseIterable, Identifiable {
         case .timerMinimal: "Таймер мини"
         case .music: "Музыка"
         case .airpods: "AirPods"
+        case .custom: "Свой"
         }
     }
 
@@ -60,6 +65,7 @@ enum IslandPreset: String, CaseIterable, Identifiable {
         case .timerMinimal: "smallcircle.filled.circle"
         case .music: "music.note"
         case .airpods: "airpodspro"
+        case .custom: "wand.and.stars"
         }
     }
 
@@ -75,6 +81,8 @@ enum IslandPreset: String, CaseIterable, Identifiable {
             [PresetField(label: "Осталось", key: \.primary)]
         case .incomingCall:
             [PresetField(label: "Имя", key: \.primary), PresetField(label: "Подпись", key: \.secondary)]
+        case .custom:
+            [PresetField(label: "Символ SF", key: \.primary), PresetField(label: "Текст", key: \.secondary)]
         case .plain, .lock, .faceID, .timerMinimal, .music:
             []
         }
@@ -90,6 +98,7 @@ enum IslandPreset: String, CaseIterable, Identifiable {
         case .call: PresetValues(primary: "0:42")
         case .timer: PresetValues(primary: "4:59")
         case .incomingCall: PresetValues(primary: "Мама", secondary: "мобильный")
+        case .custom: PresetValues(primary: "star.fill", secondary: "Готово")
         default: PresetValues()
         }
     }

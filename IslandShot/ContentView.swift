@@ -1,57 +1,79 @@
 import SwiftUI
 import PhotosUI
 
-struct ContentView: View {
-    @State private var pickerItem: PhotosPickerItem?
-    @State private var original: UIImage?
-    @State private var preview: UIImage?
-    @State private var profile: DeviceProfile?
+/// Загруженный скриншот: оригинал для экспорта, уменьшенная копия для превью.
+struct Shot: Identifiable {
+    let id = UUID()
+    let original: UIImage
+    let preview: UIImage
+    let profile: DeviceProfile
+    /// Фон статус-бара в зоне чёлки, найденный автоматически.
+    let notchColor: UIColor
+}
 
-    @State private var preset: IslandPreset = .lock
+struct ContentView: View {
+    @State private var pickerItems: [PhotosPickerItem] = []
+    @State private var shots: [Shot] = []
+    @State private var currentIndex = 0
+
+    // Настройки запоминаются между запусками.
+    @AppStorage("preset") private var presetRaw = IslandPreset.lock.rawValue
+    @AppStorage("offsetY") private var offsetY: Double = 0
+    @AppStorage("scale") private var scale: Double = 1
+    @AppStorage("statusBarShift") private var statusBarShift: Double = Double(IslandMetrics.statusBarShift)
+    @AppStorage("clearNotch") private var clearNotch = true
+
     @State private var values: [IslandPreset: PresetValues] = [:]
-    @State private var offsetY: Double = 0
-    @State private var scale: Double = 1
-    @State private var statusBarShift: Double = IslandMetrics.statusBarShift
+    @State private var customTint: Color = IslandColors.green
+    @State private var customNotchColor: Color?
     @State private var zoomed = true
 
     @State private var isBusy = false
     @State private var message: StatusMessage?
     @State private var shareItem: ShareItem?
 
-    private var config: IslandConfig {
+    private static let maxShots = 20
+
+    private var preset: IslandPreset { IslandPreset(rawValue: presetRaw) ?? .lock }
+
+    private var currentShot: Shot? {
+        shots.indices.contains(currentIndex) ? shots[currentIndex] : nil
+    }
+
+    private func config(for shot: Shot) -> IslandConfig {
         IslandConfig(
             preset: preset,
             values: values[preset] ?? preset.defaultValues,
             offsetY: offsetY,
             scale: scale,
-            statusBarShift: statusBarShift
+            statusBarShift: statusBarShift,
+            tint: customTint,
+            notchFill: clearNotch ? (customNotchColor ?? Color(uiColor: shot.notchColor)) : nil
         )
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                if let preview, let profile {
-                    editor(preview: preview, profile: profile)
+                if let shot = currentShot {
+                    editor(shot)
                 } else {
                     emptyState
                 }
             }
             .navigationTitle("IslandShot")
             .toolbar {
-                if original != nil {
+                if !shots.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
-                        PhotosPicker(selection: $pickerItem, matching: .images, preferredItemEncoding: .current) {
-                            Image(systemName: "photo.badge.plus")
-                        }
+                        picker { Image(systemName: "photo.badge.plus") }
                     }
                 }
             }
-            .onChange(of: pickerItem) { _, item in
-                Task { await load(item) }
+            .onChange(of: pickerItems) { _, items in
+                Task { await load(items) }
             }
             .sheet(item: $shareItem) { item in
-                ShareSheet(items: [item.url])
+                ShareSheet(items: item.urls)
             }
         }
     }
@@ -63,12 +85,12 @@ struct ContentView: View {
             Image(systemName: "iphone")
                 .font(.system(size: 56, weight: .light))
                 .foregroundStyle(.secondary)
-            Text("Выбери скриншот")
+            Text("Выбери скриншоты")
                 .font(.title2.bold())
-            Text("Подойдут скриншоты с iPhone X – 14 с чёлкой. Остров добавится в статус-бар, оригинал не изменится.")
+            Text("Подойдут скриншоты с iPhone X – 14 с чёлкой. Можно выбрать до \(Self.maxShots) штук сразу — оригиналы не изменятся.")
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
-            PhotosPicker(selection: $pickerItem, matching: .images, preferredItemEncoding: .current) {
+            picker {
                 Label("Выбрать из Фото", systemImage: "photo.on.rectangle.angled")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
@@ -77,13 +99,14 @@ struct ContentView: View {
                     .foregroundStyle(.white)
             }
             .padding(.top, 8)
+            if isBusy { ProgressView() }
             messageView
         }
         .padding(24)
         .padding(.top, 60)
     }
 
-    private func editor(preview: UIImage, profile: DeviceProfile) -> some View {
+    private func editor(_ shot: Shot) -> some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 10) {
                 Picker("Вид", selection: $zoomed) {
@@ -92,21 +115,25 @@ struct ContentView: View {
                 }
                 .pickerStyle(.segmented)
 
-                PreviewView(image: preview, canvas: profile.pointSize, config: config, zoomed: zoomed)
+                PreviewView(image: shot.preview, canvas: shot.profile.pointSize, config: config(for: shot), zoomed: zoomed)
 
                 HStack(spacing: 6) {
-                    Image(systemName: profile.isKnown ? "iphone" : "questionmark.circle")
-                    Text(profile.isKnown ? profile.name : "Устройство не распознано — подстрой положение вручную")
+                    Image(systemName: shot.profile.isKnown ? "iphone" : "questionmark.circle")
+                    Text(shot.profile.isKnown ? shot.profile.name : "Устройство не распознано — подстрой положение вручную")
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+                if shots.count > 1 { thumbnails }
             }
 
             section("Пресет") { presetGrid }
 
-            if !preset.fields.isEmpty {
+            if !preset.fields.isEmpty || preset == .custom {
                 section("Текст") { fieldsView }
             }
+
+            section("Зона чёлки") { notchView(shot) }
 
             section("Тонкая настройка") { tuningView }
 
@@ -118,12 +145,37 @@ struct ContentView: View {
 
     // MARK: - Блоки
 
+    private var thumbnails: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(shots.enumerated()), id: \.element.id) { index, item in
+                    Button {
+                        currentIndex = index
+                    } label: {
+                        Image(uiImage: item.preview)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 46, height: 100, alignment: .top)
+                            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .stroke(index == currentIndex ? Color.accentColor : Color.secondary.opacity(0.3),
+                                            lineWidth: index == currentIndex ? 2.5 : 1)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(2)
+        }
+    }
+
     private var presetGrid: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 76), spacing: 8)], spacing: 8) {
             ForEach(IslandPreset.allCases) { item in
                 let selected = item == preset
                 Button {
-                    preset = item
+                    presetRaw = item.rawValue
                 } label: {
                     VStack(spacing: 6) {
                         Image(systemName: item.icon)
@@ -159,11 +211,46 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                     TextField(field.label, text: binding(for: field.key))
                         .multilineTextAlignment(.trailing)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
                 }
                 .padding(12)
                 .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
+            if preset == .custom {
+                ColorPicker("Цвет", selection: $customTint, supportsOpacity: false)
+                    .padding(12)
+                    .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Text("Названия символов — в приложении SF Symbols или на сайте sfsymbols.com, например heart.fill, bolt.fill, camera.fill.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private func notchView(_ shot: Shot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Закрасить зону чёлки", isOn: $clearNotch)
+            if clearNotch {
+                ColorPicker(
+                    "Цвет заливки",
+                    selection: Binding(
+                        get: { customNotchColor ?? Color(uiColor: shot.notchColor) },
+                        set: { customNotchColor = $0 }
+                    ),
+                    supportsOpacity: false
+                )
+                if customNotchColor != nil {
+                    Button("Определить цвет автоматически") { customNotchColor = nil }
+                        .font(.subheadline)
+                }
+            }
+            Text("Убирает полоски и индикаторы, которые приложения рисуют под чёлкой. Цвет берётся из фона статус-бара.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var tuningView: some View {
@@ -177,32 +264,52 @@ struct ContentView: View {
             Button("Сбросить") {
                 offsetY = 0
                 scale = 1
-                statusBarShift = IslandMetrics.statusBarShift
+                statusBarShift = Double(IslandMetrics.statusBarShift)
             }
             .font(.subheadline)
-            .disabled(offsetY == 0 && scale == 1 && statusBarShift == IslandMetrics.statusBarShift)
+            .disabled(offsetY == 0 && scale == 1 && statusBarShift == Double(IslandMetrics.statusBarShift))
         }
         .padding(12)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var actions: some View {
-        HStack(spacing: 12) {
-            Button {
-                export(.save)
-            } label: {
-                Label("Сохранить", systemImage: "square.and.arrow.down")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Button {
+                    export(.save, all: false)
+                } label: {
+                    Label("Сохранить", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
 
-            Button {
-                export(.share)
-            } label: {
-                Label("Поделиться", systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity)
+                Button {
+                    export(.share, all: false)
+                } label: {
+                    Label("Поделиться", systemImage: "square.and.arrow.up")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.bordered)
+
+            if shots.count > 1 {
+                HStack(spacing: 12) {
+                    Button {
+                        export(.save, all: true)
+                    } label: {
+                        Label("Сохранить все (\(shots.count))", systemImage: "square.stack.3d.down.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    Button {
+                        export(.share, all: true)
+                    } label: {
+                        Label("Отправить все", systemImage: "square.and.arrow.up.on.square")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
         }
         .controlSize(.large)
         .disabled(isBusy)
@@ -221,6 +328,18 @@ struct ContentView: View {
     }
 
     // MARK: - Помощники
+
+    private func picker<PickerLabel: View>(@ViewBuilder label: () -> PickerLabel) -> some View {
+        let content = label()
+        return PhotosPicker(
+            selection: $pickerItems,
+            maxSelectionCount: Self.maxShots,
+            matching: .images,
+            preferredItemEncoding: .current
+        ) {
+            content
+        }
+    }
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -256,35 +375,65 @@ struct ContentView: View {
 
     // MARK: - Действия
 
-    private func load(_ item: PhotosPickerItem?) async {
-        guard let item else { return }
-        message = nil
-        guard let data = try? await item.loadTransferable(type: Data.self),
-              let image = UIImage(data: data) else {
-            message = StatusMessage(text: "Не удалось открыть изображение. Попробуй другое.", isError: true)
-            return
-        }
-        original = image
-        preview = image.downsampled(toMaxWidth: 1000)
-        profile = DeviceProfile.detect(for: CGSize(width: image.size.width * image.scale,
-                                                   height: image.size.height * image.scale))
-    }
-
-    private func export(_ action: ExportAction) {
-        guard let original, let profile else { return }
+    private func load(_ items: [PhotosPickerItem]) async {
+        guard !items.isEmpty else { return }
         isBusy = true
         message = nil
-        let snapshot = self.config
+        defer { isBusy = false }
+
+        var loaded: [Shot] = []
+        for item in items {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { continue }
+            let profile = DeviceProfile.detect(for: CGSize(width: image.size.width * image.scale,
+                                                           height: image.size.height * image.scale))
+            loaded.append(Shot(
+                original: image,
+                preview: image.downsampled(toMaxWidth: 1000),
+                profile: profile,
+                notchColor: NotchCleaner.backgroundColor(of: image, profile: profile)
+            ))
+        }
+
+        guard !loaded.isEmpty else {
+            message = StatusMessage(text: "Не удалось открыть изображения. Попробуй другие.", isError: true)
+            return
+        }
+        shots = loaded
+        currentIndex = 0
+        customNotchColor = nil
+        if loaded.count < items.count {
+            message = StatusMessage(text: "Открыто \(loaded.count) из \(items.count) изображений.", isError: true)
+        }
+    }
+
+    private func export(_ action: ExportAction, all: Bool) {
+        let targets = all ? shots : currentShot.map { [$0] } ?? []
+        guard !targets.isEmpty else { return }
+        isBusy = true
+        message = nil
+        let jobs = targets.map { (shot: $0, config: config(for: $0)) }
         Task {
             defer { isBusy = false }
             do {
-                let png = try Exporter.renderPNG(image: original, profile: profile, config: snapshot)
+                var files: [Data] = []
+                for job in jobs {
+                    files.append(try Exporter.renderPNG(image: job.shot.original, profile: job.shot.profile, config: job.config))
+                }
                 switch action {
                 case .save:
-                    try await Exporter.saveToPhotos(png)
-                    message = StatusMessage(text: "Сохранено в Фото", isError: false)
+                    for png in files {
+                        try await Exporter.saveToPhotos(png)
+                    }
+                    message = StatusMessage(
+                        text: files.count == 1 ? "Сохранено в Фото" : "Сохранено в Фото: \(files.count)",
+                        isError: false
+                    )
                 case .share:
-                    shareItem = ShareItem(url: try Exporter.temporaryFile(png))
+                    let urls = try files.enumerated().map { index, png in
+                        try Exporter.temporaryFile(png, index: index)
+                    }
+                    shareItem = ShareItem(urls: urls)
                 }
             } catch {
                 message = StatusMessage(text: error.localizedDescription, isError: true)
@@ -304,5 +453,5 @@ private struct StatusMessage {
 
 private struct ShareItem: Identifiable {
     let id = UUID()
-    let url: URL
+    let urls: [URL]
 }

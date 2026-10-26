@@ -27,6 +27,7 @@ struct IslandView: View {
     let preset: IslandPreset
     let values: PresetValues
     let screenWidth: CGFloat
+    var tint: Color = IslandColors.green
 
     private typealias M = IslandMetrics
     private typealias C = IslandColors
@@ -161,6 +162,13 @@ struct IslandView: View {
                 }
                 .frame(width: 19, height: 19)
             }
+
+        case .custom:
+            compact {
+                symbol(values.primary.isEmpty ? "star.fill" : values.primary, tint)
+            } trailing: {
+                islandText(values.secondary, tint)
+            }
         }
     }
 
@@ -278,7 +286,15 @@ struct CompositeView: View {
                     .scaleEffect(x: 1, y: config.statusBarShift + 0.5, anchor: .top)
             }
 
-            IslandView(preset: config.preset, values: config.values, screenWidth: canvas.width)
+            if let fill = config.notchFill {
+                // Закрываем всё, что приложение нарисовало в зоне чёлки (полоски, индикаторы).
+                Rectangle()
+                    .fill(fill)
+                    .frame(width: canvas.width * NotchCleaner.zoneWidthFraction,
+                           height: IslandMetrics.statusBarBand + config.statusBarShift)
+            }
+
+            IslandView(preset: config.preset, values: config.values, screenWidth: canvas.width, tint: config.tint)
                 .scaleEffect(config.scale, anchor: .top)
                 .padding(.top, IslandMetrics.top + config.offsetY)
         }

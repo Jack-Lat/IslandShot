@@ -34,9 +34,9 @@ enum Exporter {
         }
     }
 
-    static func temporaryFile(_ png: Data) throws -> URL {
+    static func temporaryFile(_ png: Data, index: Int = 0) throws -> URL {
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("IslandShot-\(Int(Date().timeIntervalSince1970)).png")
+            .appendingPathComponent("IslandShot-\(Int(Date().timeIntervalSince1970))-\(index + 1).png")
         try png.write(to: url, options: .atomic)
         return url
     }
